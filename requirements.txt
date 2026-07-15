@@ -1,0 +1,11 @@
+duckdb
+loguru
+pandas
+plotly
+pyarrow
+pydantic
+python-dotenv
+pyyaml
+requests
+streamlit
+typer

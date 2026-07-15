@@ -1,0 +1,19 @@
+project_name: miele-wordstat-parser
+
+paths:
+  data_root: /mnt/miele-ssd/miele-data
+  raw_dir: raw/yandex_wordstat
+  duckdb_path: warehouse/duckdb/miele.duckdb
+  parquet_dir: warehouse/parquet
+  exports_dir: exports
+  logs_dir: logs
+  state_dir: state
+  backups_dir: backups
+
+yandex:
+  default_region: 225
+
+limits:
+  max_requests_per_batch: 200
+  max_requests_per_minute: 30
+  max_spend_per_day: 1000

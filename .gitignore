@@ -1,0 +1,21 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+
+# Local runtime data must stay off GitHub.
+data/
+raw/
+warehouse/
+exports/
+logs/
+state/
+backups/
+*.duckdb
+*.parquet
+*.json
+
+# OS/editor noise
+.DS_Store
+.idea/
+.vscode/
