@@ -9,6 +9,7 @@ from .config import Settings, load_settings
 from .db import database_summary, initialize_database
 from .parser import parse_raw_files
 from .planner import plan_from_seed_file
+from .seed_generator import generate_probe_seed_file
 from .yandex_client import YandexSearchApiError, YandexWordstatClient
 
 app = typer.Typer(help="Local Miele Wordstat collection pipeline.")
@@ -114,17 +115,43 @@ def plan(
 
 
 @app.command("run-batch")
-def run_batch(limit: int = typer.Option(200, help="Maximum tasks to run.")) -> None:
+def run_batch(
+    limit: int = typer.Option(200, help="Maximum tasks to run."),
+    stop_on_failure: bool = typer.Option(
+        False,
+        help="Stop after the first failed API task.",
+    ),
+) -> None:
     """Run a resumable collection batch."""
     settings = load_settings()
     try:
-        result = run_collection_batch(settings, limit=limit)
+        result = run_collection_batch(
+            settings,
+            limit=limit,
+            stop_on_failure=stop_on_failure,
+        )
     except YandexSearchApiError as exc:
         typer.echo(str(exc))
         raise typer.Exit(1) from exc
     typer.echo(f"selected: {result['selected']}")
     typer.echo(f"completed: {result['completed']}")
     typer.echo(f"failed: {result['failed']}")
+
+
+@app.command("generate-probe-seeds")
+def generate_probe_seeds(
+    output: Path = typer.Option(
+        Path("seeds/miele_probe_queries.csv"),
+        help="Output CSV path.",
+    ),
+    limit: int = typer.Option(120, help="Maximum generated seed rows."),
+    region: int | None = typer.Option(None, help="Yandex region ID."),
+) -> None:
+    """Generate a broader Miele seed list for API limit probing."""
+    settings = load_settings()
+    rows = generate_probe_seed_file(output, limit, region or settings.default_region)
+    typer.echo(f"generated_rows: {rows}")
+    typer.echo(f"output: {output}")
 
 
 @app.command("parse")

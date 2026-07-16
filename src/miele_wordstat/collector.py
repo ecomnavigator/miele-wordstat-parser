@@ -48,7 +48,12 @@ def pending_tasks(settings: Settings, limit: int) -> list[dict[str, Any]]:
     ]
 
 
-def run_batch(settings: Settings, limit: int) -> dict[str, int]:
+def run_batch(
+    settings: Settings,
+    limit: int,
+    *,
+    stop_on_failure: bool = False,
+) -> dict[str, int]:
     initialize_database(settings)
     if not settings.yandex_search_api_key:
         raise YandexSearchApiError("YANDEX_SEARCH_API_KEY is missing")
@@ -122,6 +127,8 @@ def run_batch(settings: Settings, limit: int) -> dict[str, int]:
                     [finished_at, str(exc)[:1000], task["task_id"]],
                 )
                 failed += 1
+                if stop_on_failure:
+                    break
 
             if index < len(tasks) - 1:
                 time.sleep(delay)

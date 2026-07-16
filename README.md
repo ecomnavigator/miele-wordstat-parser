@@ -106,3 +106,12 @@ Current implementation:
 - `plan` loads `seeds/miele_queries.csv` into DuckDB collection tasks.
 - `run-batch` executes pending web search tasks and stores raw JSON responses.
 - `parse` decodes saved Search API XML and stores snapshots for the dashboard.
+
+For a conservative API limit probe:
+
+```bash
+miele-wordstat generate-probe-seeds --limit 120
+miele-wordstat plan --seed-file seeds/miele_probe_queries.csv
+miele-wordstat run-batch --limit 120 --stop-on-failure
+miele-wordstat parse
+```
