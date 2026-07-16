@@ -37,18 +37,59 @@ MODIFIERS = [
     "мешки",
     "средство",
     "акция",
+    "скидка",
+    "распродажа",
+    "доставка",
+    "установка",
+    "подключение",
+    "гарантия",
+    "неисправность",
+    "не включается",
+    "не работает",
+    "замена",
+    "оригинал",
+    "расходники",
+    "сравнение",
+    "лучший",
+    "новый",
+    "б у",
+    "бу",
+    "форум",
+    "обзор",
+    "характеристики",
+    "размеры",
+    "встраиваемый",
 ]
 
 
 def generate_probe_seed_file(path: Path, limit: int, region: int) -> int:
     rows: list[tuple[str, str, int]] = []
+    seen: set[str] = set()
     for product, category in PRODUCTS:
         for modifier in MODIFIERS:
+            candidates = [
+                f"{product} miele",
+                f"{product} миле",
+                f"miele {product}",
+            ]
             if modifier:
-                query = f"{modifier} {product} miele"
-            else:
-                query = f"{product} miele"
-            rows.append((query, category, region))
+                candidates.extend(
+                    [
+                        f"{modifier} {product} miele",
+                        f"{modifier} {product} миле",
+                        f"{product} miele {modifier}",
+                        f"{product} миле {modifier}",
+                        f"miele {product} {modifier}",
+                    ]
+                )
+            for query in candidates:
+                normalized = " ".join(query.split()).casefold()
+                if normalized in seen:
+                    continue
+                seen.add(normalized)
+                rows.append((query, category, region))
+                if len(rows) >= limit:
+                    break
             if len(rows) >= limit:
                 break
         if len(rows) >= limit:
