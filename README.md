@@ -35,6 +35,15 @@ Runtime data should live outside the repository, for example:
   backups/
 ```
 
+For the first laptop-only phase, use the same layout on the internal disk:
+
+```env
+DATA_ROOT=/home/maksim/miele-data
+```
+
+When a separate SSD is added later, move that directory and update `DATA_ROOT`
+in the local `.env`.
+
 ## First setup on Debian
 
 ```bash

@@ -5,6 +5,7 @@ from pathlib import Path
 import typer
 
 from .config import Settings, load_settings
+from .db import database_summary, initialize_database
 
 app = typer.Typer(help="Local Miele Wordstat collection pipeline.")
 
@@ -24,11 +25,13 @@ def runtime_dirs(settings: Settings) -> list[Path]:
 
 @app.command()
 def init() -> None:
-    """Create local runtime directories on the configured data disk."""
+    """Create runtime directories and initialize the local DuckDB schema."""
     settings = load_settings()
     for path in runtime_dirs(settings):
         path.mkdir(parents=True, exist_ok=True)
         typer.echo(f"ok {path}")
+    initialize_database(settings)
+    typer.echo(f"ok {settings.duckdb_path}")
 
 
 @app.command()
@@ -41,6 +44,13 @@ def status() -> None:
     typer.echo(f"parquet_dir: {settings.parquet_dir}")
     typer.echo(f"default_region: {settings.default_region}")
     typer.echo(f"max_requests_per_batch: {settings.max_requests_per_batch}")
+    summary = database_summary(settings)
+    if summary["exists"]:
+        typer.echo(
+            f"duckdb_schema: {summary['tables']} tables, {summary['views']} views"
+        )
+    else:
+        typer.echo("duckdb_schema: missing")
     typer.echo(
         "yandex_search_api_key: "
         + ("configured" if settings.yandex_search_api_key else "missing")
