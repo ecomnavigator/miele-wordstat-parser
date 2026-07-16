@@ -7,6 +7,7 @@ from pathlib import Path
 
 import duckdb
 
+from .classification import infer_intent, infer_super_intent
 from .config import Settings
 from .db import initialize_database
 
@@ -48,6 +49,8 @@ def plan_from_seed_file(settings: Settings, seed_file: Path) -> dict[str, int]:
         for seed in seeds:
             query_id = stable_id("query", seed.query)
             task_id = stable_id("web_search", seed.query, seed.region)
+            intent = infer_intent(seed.query)
+            super_intent = infer_super_intent(intent)
 
             if not con.execute(
                 "select 1 from queries where query_id = ?", [query_id]
@@ -55,19 +58,38 @@ def plan_from_seed_file(settings: Settings, seed_file: Path) -> dict[str, int]:
                 con.execute(
                     """
                     insert into queries (
-                        query_id, query, normalized_query, category, source
+                        query_id,
+                        query,
+                        normalized_query,
+                        category,
+                        intent,
+                        super_intent,
+                        source
                     )
-                    values (?, ?, ?, ?, ?)
+                    values (?, ?, ?, ?, ?, ?, ?)
                     """,
                     [
                         query_id,
                         seed.query,
                         seed.query.casefold(),
                         seed.category,
+                        intent,
+                        super_intent,
                         "seed",
                     ],
                 )
                 inserted_queries += 1
+            else:
+                con.execute(
+                    """
+                    update queries
+                    set category = coalesce(category, ?),
+                        intent = coalesce(intent, ?),
+                        super_intent = coalesce(super_intent, ?)
+                    where query_id = ?
+                    """,
+                    [seed.category, intent, super_intent, query_id],
+                )
 
             if not con.execute(
                 "select 1 from collection_tasks where task_id = ?", [task_id]

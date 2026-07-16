@@ -122,14 +122,33 @@ def run_batch(
         False,
         help="Stop after the first failed API task.",
     ),
+    progress_every: int = typer.Option(
+        25,
+        help="Print progress every N processed tasks. Set 0 to disable.",
+    ),
 ) -> None:
     """Run a resumable collection batch."""
     settings = load_settings()
+
+    def print_progress(progress: dict[str, int]) -> None:
+        processed = progress["processed"]
+        selected = progress["selected"]
+        if progress_every <= 0:
+            return
+        if processed == 1 or processed == selected or processed % progress_every == 0:
+            typer.echo(
+                "progress: "
+                f"{processed}/{selected} "
+                f"completed={progress['completed']} "
+                f"failed={progress['failed']}"
+            )
+
     try:
         result = run_collection_batch(
             settings,
             limit=limit,
             stop_on_failure=stop_on_failure,
+            progress_callback=print_progress,
         )
     except YandexSearchApiError as exc:
         typer.echo(str(exc))

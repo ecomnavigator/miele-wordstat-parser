@@ -4,7 +4,7 @@ import json
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 import duckdb
 
@@ -53,6 +53,7 @@ def run_batch(
     limit: int,
     *,
     stop_on_failure: bool = False,
+    progress_callback: Callable[[dict[str, int]], None] | None = None,
 ) -> dict[str, int]:
     initialize_database(settings)
     if not settings.yandex_search_api_key:
@@ -132,6 +133,16 @@ def run_batch(
 
             if index < len(tasks) - 1:
                 time.sleep(delay)
+
+            if progress_callback is not None:
+                progress_callback(
+                    {
+                        "selected": len(tasks),
+                        "processed": index + 1,
+                        "completed": completed,
+                        "failed": failed,
+                    }
+                )
 
     return {
         "selected": len(tasks),

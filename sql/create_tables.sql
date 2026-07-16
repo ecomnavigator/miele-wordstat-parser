@@ -19,10 +19,13 @@ create table if not exists queries (
     normalized_query varchar,
     category varchar,
     intent varchar,
+    super_intent varchar,
     product_type varchar,
     source varchar not null,
     first_seen_at timestamp not null default current_timestamp
 );
+
+alter table queries add column if not exists super_intent varchar;
 
 create table if not exists frequency_monthly (
     query_id varchar not null,

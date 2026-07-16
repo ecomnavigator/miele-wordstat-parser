@@ -5,52 +5,8 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from miele_wordstat.classification import infer_intent, resolve_super_intent
 from miele_wordstat.config import load_settings
-
-
-INTENT_KEYWORDS = {
-    "buy": [
-        "купить",
-        "цена",
-        "магазин",
-        "акция",
-        "скидка",
-        "распродажа",
-        "доставка",
-    ],
-    "service": [
-        "ремонт",
-        "сервис",
-        "сервисный",
-        "неисправность",
-        "не работает",
-        "не включается",
-        "ошибка",
-        "замена",
-    ],
-    "parts": ["запчасти", "фильтр", "мешки", "средство", "расходники", "оригинал"],
-    "research": [
-        "отзывы",
-        "обзор",
-        "характеристики",
-        "размеры",
-        "сравнение",
-        "лучший",
-        "форум",
-    ],
-    "manual": ["инструкция", "подключение", "установка", "гарантия"],
-    "brand": ["официальный сайт"],
-}
-
-SUPER_INTENT_BY_INTENT = {
-    "buy": "commercial",
-    "service": "commercial",
-    "parts": "commercial",
-    "brand": "commercial",
-    "research": "informational",
-    "manual": "informational",
-    "generic": "informational",
-}
 
 
 st.set_page_config(page_title="Miele Wordstat BI", layout="wide")
@@ -74,6 +30,7 @@ def load_search_snapshots(duckdb_path: str) -> pd.DataFrame:
                 s.query,
                 coalesce(q.category, 'uncategorized') as category,
                 q.intent,
+                q.super_intent,
                 q.product_type,
                 s.region,
                 s.fetched_at,
@@ -102,6 +59,7 @@ def load_frequency_monthly(duckdb_path: str) -> pd.DataFrame:
                 f.query,
                 coalesce(q.category, 'uncategorized') as category,
                 q.intent,
+                q.super_intent,
                 q.product_type,
                 f.region,
                 f.impressions,
@@ -124,6 +82,7 @@ def load_search_results(duckdb_path: str) -> pd.DataFrame:
                 r.query,
                 coalesce(q.category, 'uncategorized') as category,
                 q.intent,
+                q.super_intent,
                 q.product_type,
                 r.region,
                 r.fetched_at,
@@ -137,20 +96,6 @@ def load_search_results(duckdb_path: str) -> pd.DataFrame:
             order by r.query, r.position
             """
         ).fetchdf()
-
-
-def infer_intent(query: str, stored_intent: object) -> str:
-    if isinstance(stored_intent, str) and stored_intent.strip():
-        return stored_intent
-    normalized = query.casefold()
-    for intent, keywords in INTENT_KEYWORDS.items():
-        if any(keyword in normalized for keyword in keywords):
-            return intent
-    return "generic"
-
-
-def infer_super_intent(intent: str) -> str:
-    return SUPER_INTENT_BY_INTENT.get(intent, "informational")
 
 
 def csv_bytes(df: pd.DataFrame) -> bytes:
@@ -174,7 +119,15 @@ snapshots["intent"] = [
     infer_intent(query, intent)
     for query, intent in zip(snapshots["query"], snapshots["intent"], strict=False)
 ]
-snapshots["super_intent"] = snapshots["intent"].map(infer_super_intent)
+snapshots["super_intent"] = snapshots["super_intent"].where(
+    snapshots["super_intent"].notna(), None
+)
+snapshots["super_intent"] = [
+    resolve_super_intent(intent, super_intent)
+    for intent, super_intent in zip(
+        snapshots["intent"], snapshots["super_intent"], strict=False
+    )
+]
 organic_results = load_search_results(str(settings.duckdb_path))
 if not organic_results.empty:
     organic_results["fetched_at"] = pd.to_datetime(organic_results["fetched_at"])
@@ -185,7 +138,17 @@ if not organic_results.empty:
             organic_results["query"], organic_results["intent"], strict=False
         )
     ]
-    organic_results["super_intent"] = organic_results["intent"].map(infer_super_intent)
+    organic_results["super_intent"] = organic_results["super_intent"].where(
+        organic_results["super_intent"].notna(), None
+    )
+    organic_results["super_intent"] = [
+        resolve_super_intent(intent, super_intent)
+        for intent, super_intent in zip(
+            organic_results["intent"],
+            organic_results["super_intent"],
+            strict=False,
+        )
+    ]
 
 with st.sidebar:
     st.header("Filters")
