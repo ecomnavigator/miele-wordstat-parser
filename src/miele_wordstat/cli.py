@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 import duckdb
+import requests
 import typer
 
 from .collector import run_batch as run_collection_batch
@@ -220,6 +221,80 @@ def parse() -> None:
     typer.echo(f"files: {result['files']}")
     typer.echo(f"parsed: {result['parsed']}")
     typer.echo(f"failed: {result['failed']}")
+
+
+@app.command("validate")
+def validate(
+    streamlit_url: str = typer.Option(
+        "http://127.0.0.1:8501/_stcore/health",
+        help="Streamlit health URL.",
+    ),
+    expected_position: int = typer.Option(
+        10,
+        help="Expected deepest organic position per query.",
+    ),
+) -> None:
+    """Validate collection completeness and dashboard health."""
+    settings = load_settings()
+    if not settings.duckdb_path.exists():
+        typer.echo("duckdb: missing")
+        raise typer.Exit(1)
+
+    ok = True
+    with duckdb.connect(str(settings.duckdb_path), read_only=True) as con:
+        task_status = con.execute(
+            """
+            select status, count(*)
+            from collection_tasks
+            group by status
+            order by status
+            """
+        ).fetchall()
+        snapshots = con.execute("select count(*) from search_snapshots").fetchone()[0]
+        results = con.execute("select count(*) from search_results").fetchone()[0]
+        max_position = con.execute(
+            "select coalesce(max(position), 0) from search_results"
+        ).fetchone()[0]
+        tasks_with_expected_position = con.execute(
+            """
+            select count(distinct task_id)
+            from search_results
+            where position >= ?
+            """,
+            [expected_position],
+        ).fetchone()[0]
+        unique_domains = con.execute(
+            "select count(distinct domain) from search_results"
+        ).fetchone()[0]
+        failed_tasks = con.execute(
+            "select count(*) from collection_tasks where status = 'failed'"
+        ).fetchone()[0]
+
+    typer.echo(f"task_status: {task_status}")
+    typer.echo(f"snapshots: {snapshots}")
+    typer.echo(f"organic_results: {results}")
+    typer.echo(f"max_position: {max_position}")
+    typer.echo(f"tasks_with_position_{expected_position}: {tasks_with_expected_position}")
+    typer.echo(f"unique_domains: {unique_domains}")
+    typer.echo(f"failed_tasks: {failed_tasks}")
+
+    if snapshots == 0 or results == 0 or failed_tasks > 0:
+        ok = False
+    if max_position < expected_position:
+        ok = False
+
+    try:
+        response = requests.get(streamlit_url, timeout=5)
+        streamlit_ok = response.status_code == 200 and response.text.strip() == "ok"
+    except requests.RequestException:
+        streamlit_ok = False
+    typer.echo(f"streamlit_health: {'ok' if streamlit_ok else 'failed'}")
+    if not streamlit_ok:
+        ok = False
+
+    typer.echo(f"validation: {'ok' if ok else 'failed'}")
+    if not ok:
+        raise typer.Exit(1)
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ import streamlit as st
 
 from miele_wordstat.classification import infer_intent, resolve_super_intent
 from miele_wordstat.config import load_settings
+from miele_wordstat.domains import classify_competitor, normalize_domain
 
 
 st.set_page_config(page_title="Miele Wordstat BI", layout="wide")
@@ -115,6 +116,10 @@ snapshots["found_docs_all"] = pd.to_numeric(
     snapshots["found_docs_all"], errors="coerce"
 )
 snapshots["top_domain"] = snapshots["top_domain"].fillna("unknown")
+snapshots["normalized_top_domain"] = snapshots["top_domain"].map(normalize_domain)
+snapshots["top_competitor_type"] = snapshots["normalized_top_domain"].map(
+    classify_competitor
+)
 snapshots["intent"] = [
     infer_intent(query, intent)
     for query, intent in zip(snapshots["query"], snapshots["intent"], strict=False)
@@ -132,6 +137,12 @@ organic_results = load_search_results(str(settings.duckdb_path))
 if not organic_results.empty:
     organic_results["fetched_at"] = pd.to_datetime(organic_results["fetched_at"])
     organic_results["domain"] = organic_results["domain"].fillna("unknown")
+    organic_results["normalized_domain"] = organic_results["domain"].map(
+        normalize_domain
+    )
+    organic_results["competitor_type"] = organic_results["normalized_domain"].map(
+        classify_competitor
+    )
     organic_results["intent"] = [
         infer_intent(query, intent)
         for query, intent in zip(
@@ -163,8 +174,20 @@ with st.sidebar:
     super_intents = sorted(snapshots["super_intent"].dropna().unique().tolist())
     selected_super_intents = st.multiselect("Super intents", super_intents)
 
-    domains = sorted(snapshots["top_domain"].dropna().unique().tolist())
-    selected_domains = st.multiselect("Top domains", domains)
+    domains = sorted(snapshots["normalized_top_domain"].dropna().unique().tolist())
+    selected_domains = st.multiselect("Domains", domains)
+
+    competitor_types = sorted(
+        snapshots["top_competitor_type"].dropna().unique().tolist()
+    )
+    if not organic_results.empty:
+        competitor_types = sorted(
+            set(competitor_types)
+            | set(organic_results["competitor_type"].dropna().unique().tolist())
+        )
+    selected_competitor_types = st.multiselect(
+        "Competitor types", competitor_types
+    )
 
     regions = sorted(snapshots["region"].dropna().unique().tolist())
     selected_regions = st.multiselect("Regions", regions)
@@ -192,7 +215,11 @@ if selected_intents:
 if selected_super_intents:
     filtered = filtered[filtered["super_intent"].isin(selected_super_intents)]
 if selected_domains:
-    filtered = filtered[filtered["top_domain"].isin(selected_domains)]
+    filtered = filtered[filtered["normalized_top_domain"].isin(selected_domains)]
+if selected_competitor_types:
+    filtered = filtered[
+        filtered["top_competitor_type"].isin(selected_competitor_types)
+    ]
 if selected_regions:
     filtered = filtered[filtered["region"].isin(selected_regions)]
 filtered = filtered[
@@ -207,7 +234,7 @@ latest_fetch = filtered["fetched_at"].max()
 total_queries = len(filtered)
 median_results = int(filtered["result_count"].median())
 max_results = int(filtered["result_count"].max())
-domain_count = filtered["top_domain"].nunique()
+domain_count = filtered["normalized_top_domain"].nunique()
 
 kpi_cols = st.columns(5)
 kpi_cols[0].metric("Queries", f"{total_queries:,}")
@@ -227,6 +254,7 @@ download_cols[0].download_button(
 (
     tab_overview,
     tab_domains,
+    tab_competitors,
     tab_categories,
     tab_intents,
     tab_super_intents,
@@ -236,6 +264,7 @@ download_cols[0].download_button(
     [
         "Overview",
         "Domains",
+        "Competitors",
         "Categories",
         "Intents",
         "Super Intents",
@@ -289,7 +318,11 @@ with tab_domains:
     ].copy()
     if selected_domains and not filtered_results.empty:
         filtered_results = filtered_results[
-            filtered_results["domain"].isin(selected_domains)
+            filtered_results["normalized_domain"].isin(selected_domains)
+        ]
+    if selected_competitor_types and not filtered_results.empty:
+        filtered_results = filtered_results[
+            filtered_results["competitor_type"].isin(selected_competitor_types)
         ]
 
     if filtered_results.empty:
@@ -302,15 +335,19 @@ with tab_domains:
                 max_results=("result_count", "max"),
             )
             .rename(columns={"top_domain": "domain"})
+            .assign(
+                normalized_domain=lambda df: df["domain"].map(normalize_domain),
+                competitor_type=lambda df: df["domain"].map(classify_competitor),
+            )
             .sort_values(["queries", "max_results"], ascending=False)
             .head(top_n)
         )
         fig = px.bar(
             domain_summary.sort_values("queries"),
             x="queries",
-            y="domain",
+            y="normalized_domain",
             orientation="h",
-            hover_data=["median_results", "max_results"],
+            hover_data=["domain", "competitor_type", "median_results", "max_results"],
             title=f"Top {len(domain_summary)} domains appearing first in results",
         )
         fig.update_layout(xaxis_title="Queries", yaxis_title=None)
@@ -318,7 +355,7 @@ with tab_domains:
         st.dataframe(domain_summary, width="stretch", hide_index=True)
     else:
         domain_summary = (
-            filtered_results.groupby("domain", as_index=False)
+            filtered_results.groupby(["normalized_domain", "competitor_type"], as_index=False)
             .agg(
                 top10_appearances=("query", "count"),
                 unique_queries=("query", "nunique"),
@@ -339,9 +376,10 @@ with tab_domains:
         fig = px.bar(
             domain_summary.sort_values("top10_appearances"),
             x="top10_appearances",
-            y="domain",
+            y="normalized_domain",
             orientation="h",
             hover_data=[
+                "competitor_type",
                 "unique_queries",
                 "top3_appearances",
                 "position1_appearances",
@@ -354,16 +392,18 @@ with tab_domains:
         st.plotly_chart(fig, width="stretch")
 
         position_distribution = (
-            filtered_results.groupby(["position", "domain"], as_index=False)
+            filtered_results.groupby(["position", "normalized_domain"], as_index=False)
             .agg(appearances=("query", "count"))
             .sort_values("appearances", ascending=False)
         )
-        top_domains = domain_summary["domain"].head(10).tolist()
+        top_domains = domain_summary["normalized_domain"].head(10).tolist()
         fig = px.bar(
-            position_distribution[position_distribution["domain"].isin(top_domains)],
+            position_distribution[
+                position_distribution["normalized_domain"].isin(top_domains)
+            ],
             x="position",
             y="appearances",
-            color="domain",
+            color="normalized_domain",
             title="Position distribution for top domains",
         )
         fig.update_layout(xaxis_title="Organic position", yaxis_title="Appearances")
@@ -374,6 +414,129 @@ with tab_domains:
             "Download domain visibility CSV",
             data=csv_bytes(domain_summary),
             file_name="miele_domain_visibility_top10.csv",
+            mime="text/csv",
+        )
+
+with tab_competitors:
+    competitor_results = organic_results[
+        organic_results["task_id"].isin(filtered["task_id"])
+    ].copy()
+    if selected_domains and not competitor_results.empty:
+        competitor_results = competitor_results[
+            competitor_results["normalized_domain"].isin(selected_domains)
+        ]
+    if selected_competitor_types and not competitor_results.empty:
+        competitor_results = competitor_results[
+            competitor_results["competitor_type"].isin(selected_competitor_types)
+        ]
+
+    if competitor_results.empty:
+        st.info("No competitor rows yet. Wait for the top-10 collection to finish.")
+    else:
+        competitor_summary = (
+            competitor_results.groupby(
+                ["normalized_domain", "competitor_type", "super_intent"], as_index=False
+            )
+            .agg(
+                top10_appearances=("query", "count"),
+                unique_queries=("query", "nunique"),
+                top3_appearances=("position", lambda values: int((values <= 3).sum())),
+                position1_appearances=(
+                    "position",
+                    lambda values: int((values == 1).sum()),
+                ),
+                best_position=("position", "min"),
+                avg_position=("position", "mean"),
+            )
+            .sort_values(
+                ["top10_appearances", "top3_appearances", "position1_appearances"],
+                ascending=False,
+            )
+        )
+
+        type_summary = (
+            competitor_results.groupby("competitor_type", as_index=False)
+            .agg(
+                appearances=("query", "count"),
+                unique_domains=("normalized_domain", "nunique"),
+                unique_queries=("query", "nunique"),
+                top3_appearances=("position", lambda values: int((values <= 3).sum())),
+                position1_appearances=(
+                    "position",
+                    lambda values: int((values == 1).sum()),
+                ),
+            )
+            .sort_values("appearances", ascending=False)
+        )
+
+        chart_cols = st.columns(2)
+        with chart_cols[0]:
+            fig = px.bar(
+                type_summary,
+                x="competitor_type",
+                y="appearances",
+                hover_data=["unique_domains", "unique_queries", "top3_appearances"],
+                title="Competitor type mix in top-10",
+            )
+            fig.update_layout(xaxis_title=None, yaxis_title="Appearances")
+            st.plotly_chart(fig, width="stretch")
+        with chart_cols[1]:
+            top_competitors = (
+                competitor_summary.groupby(
+                    ["normalized_domain", "competitor_type"], as_index=False
+                )
+                .agg(
+                    top10_appearances=("top10_appearances", "sum"),
+                    top3_appearances=("top3_appearances", "sum"),
+                    position1_appearances=("position1_appearances", "sum"),
+                    best_position=("best_position", "min"),
+                    avg_position=("avg_position", "mean"),
+                )
+                .sort_values(
+                    ["top10_appearances", "top3_appearances"],
+                    ascending=False,
+                )
+                .head(top_n)
+            )
+            fig = px.bar(
+                top_competitors.sort_values("top10_appearances"),
+                x="top10_appearances",
+                y="normalized_domain",
+                color="competitor_type",
+                orientation="h",
+                hover_data=["top3_appearances", "position1_appearances"],
+                title=f"Top {len(top_competitors)} competitors",
+            )
+            fig.update_layout(xaxis_title="Top-10 appearances", yaxis_title=None)
+            st.plotly_chart(fig, width="stretch")
+
+        super_intent_competitors = (
+            competitor_summary.groupby(
+                ["super_intent", "normalized_domain", "competitor_type"], as_index=False
+            )
+            .agg(
+                top10_appearances=("top10_appearances", "sum"),
+                top3_appearances=("top3_appearances", "sum"),
+                position1_appearances=("position1_appearances", "sum"),
+                best_position=("best_position", "min"),
+            )
+            .sort_values(
+                ["super_intent", "top10_appearances", "top3_appearances"],
+                ascending=[True, False, False],
+            )
+        )
+
+        st.dataframe(top_competitors, width="stretch", hide_index=True)
+        st.download_button(
+            "Download competitor summary CSV",
+            data=csv_bytes(top_competitors),
+            file_name="miele_competitor_summary.csv",
+            mime="text/csv",
+        )
+        st.download_button(
+            "Download competitor by super intent CSV",
+            data=csv_bytes(super_intent_competitors),
+            file_name="miele_competitors_by_super_intent.csv",
             mime="text/csv",
         )
 
@@ -538,6 +701,8 @@ with tab_data:
                 "found_docs_all",
                 "found_docs_phrase",
                 "top_domain",
+                "normalized_top_domain",
+                "top_competitor_type",
                 "top_url",
                 "fetched_at",
             ]
@@ -558,6 +723,8 @@ with tab_data:
                     "intent",
                     "position",
                     "domain",
+                    "normalized_domain",
+                    "competitor_type",
                     "url",
                     "title",
                     "snippet",
