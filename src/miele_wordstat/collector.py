@@ -88,7 +88,7 @@ def run_batch(
                 response = client.web_search(
                     query=task["query"],
                     region=int(task["region"]),
-                    groups_on_page=1,
+                    groups_on_page=10,
                     docs_in_group=1,
                 )
                 finished_at = utc_now()

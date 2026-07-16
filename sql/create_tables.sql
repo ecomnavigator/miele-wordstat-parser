@@ -65,3 +65,18 @@ create table if not exists search_snapshots (
     source_file varchar not null,
     parsed_at timestamp not null default current_timestamp
 );
+
+create table if not exists search_results (
+    task_id varchar not null,
+    query varchar not null,
+    region integer not null,
+    fetched_at timestamp not null,
+    position integer not null,
+    domain varchar,
+    url varchar,
+    title varchar,
+    snippet varchar,
+    source_file varchar not null,
+    parsed_at timestamp not null default current_timestamp,
+    primary key (task_id, position)
+);

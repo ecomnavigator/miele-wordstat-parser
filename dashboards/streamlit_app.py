@@ -114,6 +114,31 @@ def load_frequency_monthly(duckdb_path: str) -> pd.DataFrame:
         ).fetchdf()
 
 
+@st.cache_data(ttl=60)
+def load_search_results(duckdb_path: str) -> pd.DataFrame:
+    with duckdb.connect(duckdb_path, read_only=True) as con:
+        return con.execute(
+            """
+            select
+                r.task_id,
+                r.query,
+                coalesce(q.category, 'uncategorized') as category,
+                q.intent,
+                q.product_type,
+                r.region,
+                r.fetched_at,
+                r.position,
+                r.domain,
+                r.url,
+                r.title,
+                r.snippet
+            from search_results r
+            left join queries q on q.query = r.query
+            order by r.query, r.position
+            """
+        ).fetchdf()
+
+
 def infer_intent(query: str, stored_intent: object) -> str:
     if isinstance(stored_intent, str) and stored_intent.strip():
         return stored_intent
@@ -150,6 +175,17 @@ snapshots["intent"] = [
     for query, intent in zip(snapshots["query"], snapshots["intent"], strict=False)
 ]
 snapshots["super_intent"] = snapshots["intent"].map(infer_super_intent)
+organic_results = load_search_results(str(settings.duckdb_path))
+if not organic_results.empty:
+    organic_results["fetched_at"] = pd.to_datetime(organic_results["fetched_at"])
+    organic_results["domain"] = organic_results["domain"].fillna("unknown")
+    organic_results["intent"] = [
+        infer_intent(query, intent)
+        for query, intent in zip(
+            organic_results["query"], organic_results["intent"], strict=False
+        )
+    ]
+    organic_results["super_intent"] = organic_results["intent"].map(infer_super_intent)
 
 with st.sidebar:
     st.header("Filters")
@@ -285,27 +321,98 @@ with tab_overview:
         st.plotly_chart(scatter, width="stretch")
 
 with tab_domains:
-    domain_summary = (
-        filtered.groupby("top_domain", as_index=False)
-        .agg(
-            queries=("query", "count"),
-            median_results=("result_count", "median"),
-            max_results=("result_count", "max"),
+    filtered_results = organic_results[
+        organic_results["task_id"].isin(filtered["task_id"])
+    ].copy()
+    if selected_domains and not filtered_results.empty:
+        filtered_results = filtered_results[
+            filtered_results["domain"].isin(selected_domains)
+        ]
+
+    if filtered_results.empty:
+        st.info("No organic position rows yet. Run parse after collecting top-10 data.")
+        domain_summary = (
+            filtered.groupby("top_domain", as_index=False)
+            .agg(
+                queries=("query", "count"),
+                median_results=("result_count", "median"),
+                max_results=("result_count", "max"),
+            )
+            .rename(columns={"top_domain": "domain"})
+            .sort_values(["queries", "max_results"], ascending=False)
+            .head(top_n)
         )
-        .sort_values(["queries", "max_results"], ascending=False)
-        .head(top_n)
-    )
-    fig = px.bar(
-        domain_summary.sort_values("queries"),
-        x="queries",
-        y="top_domain",
-        orientation="h",
-        hover_data=["median_results", "max_results"],
-        title=f"Top {len(domain_summary)} domains appearing first in results",
-    )
-    fig.update_layout(xaxis_title="Queries", yaxis_title=None)
-    st.plotly_chart(fig, width="stretch")
-    st.dataframe(domain_summary, width="stretch", hide_index=True)
+        fig = px.bar(
+            domain_summary.sort_values("queries"),
+            x="queries",
+            y="domain",
+            orientation="h",
+            hover_data=["median_results", "max_results"],
+            title=f"Top {len(domain_summary)} domains appearing first in results",
+        )
+        fig.update_layout(xaxis_title="Queries", yaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+        st.dataframe(domain_summary, width="stretch", hide_index=True)
+    else:
+        domain_summary = (
+            filtered_results.groupby("domain", as_index=False)
+            .agg(
+                top10_appearances=("query", "count"),
+                unique_queries=("query", "nunique"),
+                best_position=("position", "min"),
+                avg_position=("position", "mean"),
+                top3_appearances=("position", lambda values: int((values <= 3).sum())),
+                position1_appearances=(
+                    "position",
+                    lambda values: int((values == 1).sum()),
+                ),
+            )
+            .sort_values(
+                ["top10_appearances", "top3_appearances", "position1_appearances"],
+                ascending=False,
+            )
+            .head(top_n)
+        )
+        fig = px.bar(
+            domain_summary.sort_values("top10_appearances"),
+            x="top10_appearances",
+            y="domain",
+            orientation="h",
+            hover_data=[
+                "unique_queries",
+                "top3_appearances",
+                "position1_appearances",
+                "best_position",
+                "avg_position",
+            ],
+            title=f"Top {len(domain_summary)} domains in organic top-10",
+        )
+        fig.update_layout(xaxis_title="Top-10 appearances", yaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+
+        position_distribution = (
+            filtered_results.groupby(["position", "domain"], as_index=False)
+            .agg(appearances=("query", "count"))
+            .sort_values("appearances", ascending=False)
+        )
+        top_domains = domain_summary["domain"].head(10).tolist()
+        fig = px.bar(
+            position_distribution[position_distribution["domain"].isin(top_domains)],
+            x="position",
+            y="appearances",
+            color="domain",
+            title="Position distribution for top domains",
+        )
+        fig.update_layout(xaxis_title="Organic position", yaxis_title="Appearances")
+        st.plotly_chart(fig, width="stretch")
+
+        st.dataframe(domain_summary, width="stretch", hide_index=True)
+        st.download_button(
+            "Download domain visibility CSV",
+            data=csv_bytes(domain_summary),
+            file_name="miele_domain_visibility_top10.csv",
+            mime="text/csv",
+        )
 
 with tab_categories:
     category_summary = (
@@ -475,3 +582,25 @@ with tab_data:
         width="stretch",
         hide_index=True,
     )
+    if not organic_results.empty:
+        st.subheader("Organic positions")
+        st.dataframe(
+            organic_results[
+                organic_results["task_id"].isin(filtered["task_id"])
+            ][
+                [
+                    "query",
+                    "category",
+                    "super_intent",
+                    "intent",
+                    "position",
+                    "domain",
+                    "url",
+                    "title",
+                    "snippet",
+                    "fetched_at",
+                ]
+            ],
+            width="stretch",
+            hide_index=True,
+        )

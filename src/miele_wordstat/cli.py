@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import duckdb
 import typer
 
 from .collector import run_batch as run_collection_batch
@@ -136,6 +137,44 @@ def run_batch(
     typer.echo(f"selected: {result['selected']}")
     typer.echo(f"completed: {result['completed']}")
     typer.echo(f"failed: {result['failed']}")
+
+
+@app.command("requeue-done")
+def requeue_done(
+    limit: int = typer.Option(200, help="Maximum completed tasks to requeue."),
+) -> None:
+    """Mark completed web search tasks as pending for recollection."""
+    settings = load_settings()
+    initialize_database(settings)
+    with duckdb.connect(str(settings.duckdb_path)) as con:
+        task_ids = [
+            row[0]
+            for row in con.execute(
+                """
+                select task_id
+                from collection_tasks
+                where status = 'done'
+                  and method = 'web_search'
+                order by finished_at desc nulls last, task_id
+                limit ?
+                """,
+                [limit],
+            ).fetchall()
+        ]
+        if task_ids:
+            placeholders = ",".join(["?"] * len(task_ids))
+            con.execute(
+                f"""
+                update collection_tasks
+                set status = 'pending',
+                    started_at = null,
+                    finished_at = null,
+                    error_message = null
+                where task_id in ({placeholders})
+                """,
+                task_ids,
+            )
+    typer.echo(f"requeued: {len(task_ids)}")
 
 
 @app.command("generate-probe-seeds")
