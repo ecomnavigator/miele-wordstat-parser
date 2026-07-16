@@ -6,6 +6,7 @@ import typer
 
 from .config import Settings, load_settings
 from .db import database_summary, initialize_database
+from .yandex_client import YandexSearchApiError, YandexWordstatClient
 
 app = typer.Typer(help="Local Miele Wordstat collection pipeline.")
 
@@ -55,6 +56,41 @@ def status() -> None:
         "yandex_search_api_key: "
         + ("configured" if settings.yandex_search_api_key else "missing")
     )
+
+
+@app.command("smoke-test")
+def smoke_test(
+    query: str = typer.Option("miele", help="Search query for the API smoke test."),
+    region: int | None = typer.Option(None, help="Yandex region ID."),
+) -> None:
+    """Run one small Yandex Search API request to validate credentials."""
+    settings = load_settings()
+    if not settings.yandex_search_api_key:
+        raise typer.BadParameter("YANDEX_SEARCH_API_KEY is missing")
+    if not settings.yandex_folder_id:
+        raise typer.BadParameter("YANDEX_FOLDER_ID is missing")
+
+    client = YandexWordstatClient(
+        api_key=settings.yandex_search_api_key,
+        folder_id=settings.yandex_folder_id,
+    )
+    try:
+        result = client.web_search(
+            query=query,
+            region=region or settings.default_region,
+            groups_on_page=1,
+            docs_in_group=1,
+        )
+    except YandexSearchApiError as exc:
+        typer.echo(f"api_status: failed")
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+
+    raw_data = result.get("rawData", "")
+    typer.echo("api_status: ok")
+    typer.echo(f"query: {query}")
+    typer.echo(f"region: {region or settings.default_region}")
+    typer.echo(f"raw_data_bytes: {len(raw_data)}")
 
 
 @app.command("plan")
