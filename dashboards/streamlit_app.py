@@ -8,6 +8,41 @@ import streamlit as st
 from miele_wordstat.config import load_settings
 
 
+INTENT_KEYWORDS = {
+    "buy": [
+        "купить",
+        "цена",
+        "магазин",
+        "акция",
+        "скидка",
+        "распродажа",
+        "доставка",
+    ],
+    "service": [
+        "ремонт",
+        "сервис",
+        "сервисный",
+        "неисправность",
+        "не работает",
+        "не включается",
+        "ошибка",
+        "замена",
+    ],
+    "parts": ["запчасти", "фильтр", "мешки", "средство", "расходники", "оригинал"],
+    "research": [
+        "отзывы",
+        "обзор",
+        "характеристики",
+        "размеры",
+        "сравнение",
+        "лучший",
+        "форум",
+    ],
+    "manual": ["инструкция", "подключение", "установка", "гарантия"],
+    "brand": ["официальный сайт"],
+}
+
+
 st.set_page_config(page_title="Miele Wordstat BI", layout="wide")
 st.title("Miele Wordstat BI")
 
@@ -69,6 +104,20 @@ def load_frequency_monthly(duckdb_path: str) -> pd.DataFrame:
         ).fetchdf()
 
 
+def infer_intent(query: str, stored_intent: object) -> str:
+    if isinstance(stored_intent, str) and stored_intent.strip():
+        return stored_intent
+    normalized = query.casefold()
+    for intent, keywords in INTENT_KEYWORDS.items():
+        if any(keyword in normalized for keyword in keywords):
+            return intent
+    return "generic"
+
+
+def csv_bytes(df: pd.DataFrame) -> bytes:
+    return df.to_csv(index=False).encode("utf-8-sig")
+
+
 snapshots = load_search_snapshots(str(settings.duckdb_path))
 
 if snapshots.empty:
@@ -82,6 +131,10 @@ snapshots["found_docs_all"] = pd.to_numeric(
     snapshots["found_docs_all"], errors="coerce"
 )
 snapshots["top_domain"] = snapshots["top_domain"].fillna("unknown")
+snapshots["intent"] = [
+    infer_intent(query, intent)
+    for query, intent in zip(snapshots["query"], snapshots["intent"], strict=False)
+]
 
 with st.sidebar:
     st.header("Filters")
@@ -89,6 +142,9 @@ with st.sidebar:
 
     categories = sorted(snapshots["category"].dropna().unique().tolist())
     selected_categories = st.multiselect("Categories", categories)
+
+    intents = sorted(snapshots["intent"].dropna().unique().tolist())
+    selected_intents = st.multiselect("Intents", intents)
 
     domains = sorted(snapshots["top_domain"].dropna().unique().tolist())
     selected_domains = st.multiselect("Top domains", domains)
@@ -114,6 +170,8 @@ if query_text:
     ]
 if selected_categories:
     filtered = filtered[filtered["category"].isin(selected_categories)]
+if selected_intents:
+    filtered = filtered[filtered["intent"].isin(selected_intents)]
 if selected_domains:
     filtered = filtered[filtered["top_domain"].isin(selected_domains)]
 if selected_regions:
@@ -139,8 +197,16 @@ kpi_cols[2].metric("Max results", f"{max_results:,}")
 kpi_cols[3].metric("Top domains", f"{domain_count:,}")
 kpi_cols[4].metric("Latest fetch", latest_fetch.strftime("%Y-%m-%d %H:%M"))
 
-tab_overview, tab_domains, tab_categories, tab_history, tab_data = st.tabs(
-    ["Overview", "Domains", "Categories", "History", "Data"]
+download_cols = st.columns([1, 1, 3])
+download_cols[0].download_button(
+    "Download filtered CSV",
+    data=csv_bytes(filtered),
+    file_name="miele_filtered_queries.csv",
+    mime="text/csv",
+)
+
+tab_overview, tab_domains, tab_categories, tab_intents, tab_history, tab_data = st.tabs(
+    ["Overview", "Domains", "Categories", "Intents", "History", "Data"]
 )
 
 with tab_overview:
@@ -226,6 +292,51 @@ with tab_categories:
     )
     st.plotly_chart(fig, width="stretch")
     st.dataframe(category_summary, width="stretch", hide_index=True)
+    st.download_button(
+        "Download category summary CSV",
+        data=csv_bytes(category_summary),
+        file_name="miele_category_summary.csv",
+        mime="text/csv",
+    )
+
+with tab_intents:
+    intent_summary = (
+        filtered.groupby("intent", as_index=False)
+        .agg(
+            queries=("query", "count"),
+            median_results=("result_count", "median"),
+            max_results=("result_count", "max"),
+            avg_results=("result_count", "mean"),
+        )
+        .sort_values("queries", ascending=False)
+    )
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        fig = px.pie(
+            intent_summary,
+            names="intent",
+            values="queries",
+            title="Query mix by intent",
+        )
+        st.plotly_chart(fig, width="stretch")
+    with chart_cols[1]:
+        fig = px.bar(
+            intent_summary.sort_values("median_results"),
+            x="median_results",
+            y="intent",
+            orientation="h",
+            hover_data=["queries", "max_results"],
+            title="Median result count by intent",
+        )
+        fig.update_layout(xaxis_title="Median results", yaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+    st.dataframe(intent_summary, width="stretch", hide_index=True)
+    st.download_button(
+        "Download intent summary CSV",
+        data=csv_bytes(intent_summary),
+        file_name="miele_intent_summary.csv",
+        mime="text/csv",
+    )
 
 with tab_history:
     st.subheader("Collection timeline")
@@ -273,6 +384,7 @@ with tab_data:
             [
                 "query",
                 "category",
+                "intent",
                 "region",
                 "result_count",
                 "found_all",
