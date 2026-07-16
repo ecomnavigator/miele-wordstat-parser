@@ -9,6 +9,7 @@ import typer
 from .collector import run_batch as run_collection_batch
 from .config import Settings, load_settings
 from .db import database_summary, initialize_database
+from .export import export_bi as run_export_bi
 from .parser import parse_raw_files
 from .planner import plan_from_seed_file
 from .seed_generator import generate_probe_seed_file
@@ -295,6 +296,21 @@ def validate(
     typer.echo(f"validation: {'ok' if ok else 'failed'}")
     if not ok:
         raise typer.Exit(1)
+
+
+@app.command("export-bi")
+def export_bi() -> None:
+    """Export Metabase-friendly BI CSV files."""
+    settings = load_settings()
+    if not settings.duckdb_path.exists():
+        typer.echo("duckdb: missing")
+        raise typer.Exit(1)
+    result = run_export_bi(settings)
+    typer.echo(f"output_dir: {result['output_dir']}")
+    for key, value in result.items():
+        if key == "output_dir":
+            continue
+        typer.echo(f"{key}: {value}")
 
 
 if __name__ == "__main__":

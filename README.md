@@ -115,3 +115,39 @@ miele-wordstat plan --seed-file seeds/miele_probe_queries.csv
 miele-wordstat run-batch --limit 120 --stop-on-failure
 miele-wordstat parse
 ```
+
+## BI export and Metabase
+
+Streamlit remains the operational dashboard. Metabase can be used as a second
+BI layer over exported, read-only data so it does not lock the DuckDB warehouse.
+
+After collection and parsing finish:
+
+```bash
+miele-wordstat export-bi
+```
+
+This writes CSV marts to:
+
+```text
+$DATA_ROOT/exports/bi/
+  queries.csv
+  search_snapshots.csv
+  organic_positions.csv
+  domain_visibility.csv
+  competitors_by_super_intent.csv
+```
+
+Start Metabase:
+
+```bash
+docker compose -f docker-compose.metabase.yml up -d
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+The compose file mounts `$DATA_ROOT/exports/bi` read-only at `/exports/bi`.
