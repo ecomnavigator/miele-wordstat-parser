@@ -42,6 +42,16 @@ INTENT_KEYWORDS = {
     "brand": ["официальный сайт"],
 }
 
+SUPER_INTENT_BY_INTENT = {
+    "buy": "commercial",
+    "service": "commercial",
+    "parts": "commercial",
+    "brand": "commercial",
+    "research": "informational",
+    "manual": "informational",
+    "generic": "informational",
+}
+
 
 st.set_page_config(page_title="Miele Wordstat BI", layout="wide")
 st.title("Miele Wordstat BI")
@@ -114,6 +124,10 @@ def infer_intent(query: str, stored_intent: object) -> str:
     return "generic"
 
 
+def infer_super_intent(intent: str) -> str:
+    return SUPER_INTENT_BY_INTENT.get(intent, "informational")
+
+
 def csv_bytes(df: pd.DataFrame) -> bytes:
     return df.to_csv(index=False).encode("utf-8-sig")
 
@@ -135,6 +149,7 @@ snapshots["intent"] = [
     infer_intent(query, intent)
     for query, intent in zip(snapshots["query"], snapshots["intent"], strict=False)
 ]
+snapshots["super_intent"] = snapshots["intent"].map(infer_super_intent)
 
 with st.sidebar:
     st.header("Filters")
@@ -145,6 +160,9 @@ with st.sidebar:
 
     intents = sorted(snapshots["intent"].dropna().unique().tolist())
     selected_intents = st.multiselect("Intents", intents)
+
+    super_intents = sorted(snapshots["super_intent"].dropna().unique().tolist())
+    selected_super_intents = st.multiselect("Super intents", super_intents)
 
     domains = sorted(snapshots["top_domain"].dropna().unique().tolist())
     selected_domains = st.multiselect("Top domains", domains)
@@ -172,6 +190,8 @@ if selected_categories:
     filtered = filtered[filtered["category"].isin(selected_categories)]
 if selected_intents:
     filtered = filtered[filtered["intent"].isin(selected_intents)]
+if selected_super_intents:
+    filtered = filtered[filtered["super_intent"].isin(selected_super_intents)]
 if selected_domains:
     filtered = filtered[filtered["top_domain"].isin(selected_domains)]
 if selected_regions:
@@ -205,8 +225,24 @@ download_cols[0].download_button(
     mime="text/csv",
 )
 
-tab_overview, tab_domains, tab_categories, tab_intents, tab_history, tab_data = st.tabs(
-    ["Overview", "Domains", "Categories", "Intents", "History", "Data"]
+(
+    tab_overview,
+    tab_domains,
+    tab_categories,
+    tab_intents,
+    tab_super_intents,
+    tab_history,
+    tab_data,
+) = st.tabs(
+    [
+        "Overview",
+        "Domains",
+        "Categories",
+        "Intents",
+        "Super Intents",
+        "History",
+        "Data",
+    ]
 )
 
 with tab_overview:
@@ -338,6 +374,45 @@ with tab_intents:
         mime="text/csv",
     )
 
+with tab_super_intents:
+    super_intent_summary = (
+        filtered.groupby("super_intent", as_index=False)
+        .agg(
+            queries=("query", "count"),
+            median_results=("result_count", "median"),
+            max_results=("result_count", "max"),
+            avg_results=("result_count", "mean"),
+        )
+        .sort_values("queries", ascending=False)
+    )
+    chart_cols = st.columns(2)
+    with chart_cols[0]:
+        fig = px.pie(
+            super_intent_summary,
+            names="super_intent",
+            values="queries",
+            title="Commercial vs informational mix",
+        )
+        st.plotly_chart(fig, width="stretch")
+    with chart_cols[1]:
+        fig = px.bar(
+            super_intent_summary.sort_values("median_results"),
+            x="median_results",
+            y="super_intent",
+            orientation="h",
+            hover_data=["queries", "max_results"],
+            title="Median result count by super intent",
+        )
+        fig.update_layout(xaxis_title="Median results", yaxis_title=None)
+        st.plotly_chart(fig, width="stretch")
+    st.dataframe(super_intent_summary, width="stretch", hide_index=True)
+    st.download_button(
+        "Download super intent summary CSV",
+        data=csv_bytes(super_intent_summary),
+        file_name="miele_super_intent_summary.csv",
+        mime="text/csv",
+    )
+
 with tab_history:
     st.subheader("Collection timeline")
     hourly = (
@@ -384,6 +459,7 @@ with tab_data:
             [
                 "query",
                 "category",
+                "super_intent",
                 "intent",
                 "region",
                 "result_count",
