@@ -4,8 +4,10 @@ from pathlib import Path
 
 import typer
 
+from .collector import run_batch as run_collection_batch
 from .config import Settings, load_settings
 from .db import database_summary, initialize_database
+from .planner import plan_from_seed_file
 from .yandex_client import YandexSearchApiError, YandexWordstatClient
 
 app = typer.Typer(help="Local Miele Wordstat collection pipeline.")
@@ -94,15 +96,34 @@ def smoke_test(
 
 
 @app.command("plan")
-def plan() -> None:
-    """Create collection tasks from seed queries. Not implemented yet."""
-    raise typer.Exit("plan is not implemented yet")
+def plan(
+    seed_file: Path = typer.Option(
+        Path("seeds/miele_queries.csv"),
+        help="CSV file with query, category, and optional region columns.",
+    ),
+) -> None:
+    """Create collection tasks from seed queries."""
+    settings = load_settings()
+    if not seed_file.exists():
+        raise typer.BadParameter(f"Seed file does not exist: {seed_file}")
+    result = plan_from_seed_file(settings, seed_file)
+    typer.echo(f"seed_rows: {result['seed_rows']}")
+    typer.echo(f"inserted_queries: {result['inserted_queries']}")
+    typer.echo(f"inserted_tasks: {result['inserted_tasks']}")
 
 
 @app.command("run-batch")
 def run_batch(limit: int = typer.Option(200, help="Maximum tasks to run.")) -> None:
-    """Run a resumable collection batch. Not implemented yet."""
-    raise typer.Exit(f"run-batch is not implemented yet; requested limit={limit}")
+    """Run a resumable collection batch."""
+    settings = load_settings()
+    try:
+        result = run_collection_batch(settings, limit=limit)
+    except YandexSearchApiError as exc:
+        typer.echo(str(exc))
+        raise typer.Exit(1) from exc
+    typer.echo(f"selected: {result['selected']}")
+    typer.echo(f"completed: {result['completed']}")
+    typer.echo(f"failed: {result['failed']}")
 
 
 @app.command("parse")

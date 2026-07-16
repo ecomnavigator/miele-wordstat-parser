@@ -91,10 +91,19 @@ plan tasks -> run batches -> save raw JSON -> parse to DuckDB/Parquet -> dashboa
 Planned commands:
 
 ```bash
-python -m miele_wordstat.cli plan
-python -m miele_wordstat.cli run-batch --limit 200
+miele-wordstat smoke-test --query "miele"
+miele-wordstat plan
+miele-wordstat run-batch --limit 50
 python -m miele_wordstat.cli parse
 python -m miele_wordstat.cli status
 ```
 
-Only `init` and `status` are implemented in the initial scaffold.
+Current implementation:
+
+- `init` creates runtime folders and initializes the DuckDB schema.
+- `status` prints local runtime configuration.
+- `smoke-test` validates Yandex Search API credentials with one small request.
+- `plan` loads `seeds/miele_queries.csv` into DuckDB collection tasks.
+- `run-batch` executes pending web search tasks and stores raw JSON responses.
+
+`parse` is still planned.
