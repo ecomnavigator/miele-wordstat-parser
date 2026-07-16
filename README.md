@@ -151,3 +151,38 @@ http://localhost:3000
 ```
 
 The compose file mounts `$DATA_ROOT/exports/bi` read-only at `/exports/bi`.
+
+## Evidence.dev reports
+
+Evidence.dev is the report-as-code layer. It reads the same BI CSV marts as
+Metabase, but builds a version-controlled analytical site from SQL and Markdown.
+
+Refresh data for Evidence:
+
+```bash
+miele-wordstat export-bi
+scripts/sync_evidence_sources.sh
+```
+
+Run the report locally:
+
+```bash
+cd evidence
+npm install
+npm run sources
+npm run dev
+```
+
+Open:
+
+```text
+http://localhost:3000
+```
+
+Build a static report:
+
+```bash
+cd evidence
+npm run sources
+npm run build
+```
