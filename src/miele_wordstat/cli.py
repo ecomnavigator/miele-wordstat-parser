@@ -7,6 +7,7 @@ import typer
 from .collector import run_batch as run_collection_batch
 from .config import Settings, load_settings
 from .db import database_summary, initialize_database
+from .parser import parse_raw_files
 from .planner import plan_from_seed_file
 from .yandex_client import YandexSearchApiError, YandexWordstatClient
 
@@ -128,8 +129,12 @@ def run_batch(limit: int = typer.Option(200, help="Maximum tasks to run.")) -> N
 
 @app.command("parse")
 def parse() -> None:
-    """Parse raw JSON into DuckDB and Parquet. Not implemented yet."""
-    raise typer.Exit("parse is not implemented yet")
+    """Parse raw JSON/XML responses into DuckDB."""
+    settings = load_settings()
+    result = parse_raw_files(settings)
+    typer.echo(f"files: {result['files']}")
+    typer.echo(f"parsed: {result['parsed']}")
+    typer.echo(f"failed: {result['failed']}")
 
 
 if __name__ == "__main__":

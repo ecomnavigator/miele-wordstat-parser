@@ -105,5 +105,4 @@ Current implementation:
 - `smoke-test` validates Yandex Search API credentials with one small request.
 - `plan` loads `seeds/miele_queries.csv` into DuckDB collection tasks.
 - `run-batch` executes pending web search tasks and stores raw JSON responses.
-
-`parse` is still planned.
+- `parse` decodes saved Search API XML and stores snapshots for the dashboard.

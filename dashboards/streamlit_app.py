@@ -20,6 +20,35 @@ if not settings.duckdb_path.exists():
 
 con = duckdb.connect(str(settings.duckdb_path), read_only=True)
 
+snapshots = con.execute(
+    """
+    select
+        query,
+        coalesce(found_docs_all, found_all) as result_count,
+        found_all,
+        found_docs_all,
+        top_domain,
+        top_url,
+        fetched_at
+    from search_snapshots
+    order by result_count desc nulls last
+    """
+).fetchdf()
+
+if not snapshots.empty:
+    st.subheader("Search result count")
+    fig = px.bar(
+        snapshots,
+        x="query",
+        y="result_count",
+        color="top_domain",
+        hover_data=["found_all", "found_docs_all", "top_url"],
+    )
+    fig.update_layout(xaxis_title=None, yaxis_title="Results")
+    st.plotly_chart(fig, use_container_width=True)
+    st.dataframe(snapshots, use_container_width=True)
+    st.stop()
+
 categories = con.execute(
     "select distinct category from queries where category is not null order by 1"
 ).fetchdf()

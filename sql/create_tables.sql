@@ -50,3 +50,18 @@ create table if not exists clusters (
     description varchar,
     created_at timestamp not null default current_timestamp
 );
+
+create table if not exists search_snapshots (
+    task_id varchar primary key,
+    query varchar not null,
+    region integer not null,
+    fetched_at timestamp not null,
+    found_all bigint,
+    found_phrase bigint,
+    found_docs_all bigint,
+    found_docs_phrase bigint,
+    top_domain varchar,
+    top_url varchar,
+    source_file varchar not null,
+    parsed_at timestamp not null default current_timestamp
+);
