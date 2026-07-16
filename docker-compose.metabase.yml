@@ -1,4 +1,23 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: miele-bi-postgres
+    ports:
+      - "5433:5432"
+    environment:
+      POSTGRES_DB: miele_bi
+      POSTGRES_USER: miele
+      POSTGRES_PASSWORD: miele_bi_2026
+    volumes:
+      - metabase-postgres-data:/var/lib/postgresql/data
+      - ${DATA_ROOT:-/home/maksim/miele-data}/exports/bi:/exports/bi:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U miele -d miele_bi"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    restart: unless-stopped
+
   metabase:
     image: metabase/metabase:latest
     container_name: miele-metabase
@@ -10,7 +29,11 @@ services:
     volumes:
       - metabase-data:/metabase-data
       - ${DATA_ROOT:-/home/maksim/miele-data}/exports/bi:/exports/bi:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
 
 volumes:
   metabase-data:
+  metabase-postgres-data:

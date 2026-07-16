@@ -142,6 +142,7 @@ Start Metabase:
 
 ```bash
 docker compose -f docker-compose.metabase.yml up -d
+scripts/load_metabase_postgres.sh
 ```
 
 Open:
@@ -150,7 +151,19 @@ Open:
 http://localhost:3000
 ```
 
-The compose file mounts `$DATA_ROOT/exports/bi` read-only at `/exports/bi`.
+The compose file starts Metabase and a local PostgreSQL BI database. The loader
+script imports the CSV marts from `$DATA_ROOT/exports/bi` into PostgreSQL.
+
+Add this database in Metabase:
+
+```text
+Database type: PostgreSQL
+Host: postgres
+Port: 5432
+Database name: miele_bi
+Username: miele
+Password: miele_bi_2026
+```
 
 ## Evidence.dev reports
 
